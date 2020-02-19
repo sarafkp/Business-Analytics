@@ -17,8 +17,7 @@ library(sqldf)
 ### 1.Load Data
 
 ```{r}
-setwd("G:/UCinn Course Work/Sem2/Data Mining1/Data Exploration Using R")
-CustomerData<-read.csv("CustomerData.csv",header=TRUE,sep=",")
+CustomerData<-read.csv("/data/CustomerData.csv",header=TRUE,sep=",")
 ```
 
 ### 1.1Take a look into the data
