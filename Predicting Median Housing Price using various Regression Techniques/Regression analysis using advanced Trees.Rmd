@@ -1,0 +1,281 @@
+---
+title: "Advanced Regression Trees"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(magrittr)
+library(datasets)
+library(class)
+library(plyr)
+library(MASS)
+library(glmnet)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+```
+
+
+### Loading the dataset and getting the summary statistics
+```{r echo=FALSE}
+set.seed(13457296)
+data("Boston")
+head(Boston)
+summary(Boston)
+```
+
+```{r}
+#Train and Test Datasets
+sample_index<-sample(nrow(Boston),nrow(Boston)*0.7)
+Boston_train<-Boston[sample_index,]
+Boston_test<-Boston[-sample_index,]
+```
+
++ Stepwise regression
+```{r}
+nullmodel<-lm(medv~1, data = Boston_train )
+fullmodel<-lm(medv~., data = Boston_train )
+
+model_step_both<-step(nullmodel,
+                      scope=list(lower=nullmodel,upper=fullmodel),
+                      direction = 'forward')
+```
+
+
+Checking the in-sample error and AIC
+```{r}
+summary(model_step_both)
+AIC(model_step_both)
+
+MSE.LM<-(summary(model_step_both)$sigma)^2
+
+Test.Predict.LM<-predict(model_step_both,newdata =Boston_test )
+MSPE.LM<-mean((Boston_test$medv-Test.Predict.LM)^2)
+```
+
+
+
++ LASSO
+```{r}
+
+lasso_fit = glmnet(x = as.matrix(Boston_train[, -c(which(colnames(Boston_train)=='medv'))]), y = Boston_train$medv, alpha = 1)
+
+cv_lasso_fit<-cv.glmnet(x=as.matrix(
+                        Boston_train[,-c(which(colnames(Boston_train)=='medv'))]),
+                        y=Boston_train$medv,
+                        alpha=1,
+                        nfolds=5)
+```
+
+In Sample prediction
+```{r}
+pred.lasso.train<- predict(lasso_fit, as.matrix(Boston_train[, -c(which(colnames(Boston_train)=='medv'))]), s = cv_lasso_fit$lambda.min)
+
+MSE.Lasso<-mean((Boston_train$medv-pred.lasso.train)^2)
+
+
+pred.lasso.test<- predict(lasso_fit, as.matrix(Boston_test[, -c(which(colnames(Boston_test)=='medv'))]), s = cv_lasso_fit$lambda.min)
+
+MSPE.Lasso<-mean((Boston_test$medv-pred.lasso.test)^2)
+```
+As the MSPE for LASSO is less as compared to the step model, we will go ahead with the LASSO as the best model
+
+
+# Regression Tree
+
+Growing large tree
+```{r}
+boston.largetree <- rpart(formula = medv ~ ., data = Boston_train, cp = 0.001)
+```
+
+Pruning
+```{r}
+plotcp(boston.largetree)
+printcp(boston.largetree)
+
+boston.prunetree<-prune(boston.largetree, cp = 0.02)
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.tree = predict(boston.prunetree)
+MSE.Tree<-mean((Boston_train$medv-boston.train.pred.tree)^2)
+
+boston.test.pred.tree = predict(boston.prunetree,Boston_test)
+MSPE.Tree<-mean((Boston_test$medv-boston.test.pred.tree)^2)
+```
+
+The out of sample MSPE for the trees is higher than the LASSO model we selected
+
+
+# Advanced Trees
+# Bagging
+
+```{r}
+boston.bag<- randomForest(medv~., data = Boston_train, mtry=13,ntree=100)
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.Bag = predict(boston.bag)
+MSE.Bag<-mean((Boston_train$medv-boston.train.pred.Bag)^2)
+
+boston.bag.pred<-predict(boston.bag,newdata =Boston_test)
+MSPE.Bag<-mean((Boston_test$medv-boston.bag.pred)^2)
+```
+We observe that the MSE and MSPE using the Bagging technique is lower than both single tree and linear regression
+
+Analyze the variation in errors based on the number of trees
+```{r}
+ntree<- c(1, 3, 5, seq(10, 200, 10)) #of bootstraps
+MSPE.test<- rep(0, length(ntree)) #initalize the o/p vector
+
+for(i in 1:length(ntree)){
+  boston.bag1<- randomForest(medv~., data = Boston_train,mtry=13, ntree=ntree[i])
+  boston.bag.pred1<- predict(boston.bag1, newdata = Boston_test)
+  MSPE.test[i]<- mean((Boston_test$medv-boston.bag.pred1)^2)
+}
+plot(ntree,MSPE.test,type='l',col=2,lwd=2,xaxt="n")
+axis(1,at=ntree,las=1)
+
+optimal.tree = ntree[which(MSPE.test==min(MSPE.test))]
+```
+
+Using the optimal value of number of trees
+```{r}
+boston.bag<- randomForest(medv~., data = Boston_train, mtry=13,ntree=optimal.tree)
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.Bag = predict(boston.bag)
+MSE.Bag<-mean((Boston_train$medv-boston.train.pred.Bag)^2)
+
+boston.bag.pred<-predict(boston.bag,newdata =Boston_test)
+MSPE.Bag<-mean((Boston_test$medv-boston.bag.pred)^2)
+```
+
+# Random Forest
+```{r}
+boston.rf<- randomForest(medv~., data = Boston_train, importance=TRUE)
+boston.rf
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.RF= predict(boston.rf)
+MSE.RF<-mean((Boston_train$medv-boston.train.pred.RF)^2)
+
+boston.rf.pred<- predict(boston.rf, Boston_test)
+MSPE.RF<-mean((Boston_test$medv-boston.rf.pred)^2)
+```
+
+
+Analyze the variation in errors based on the number of variables at each cut
+```{r}
+oob.err<- rep(0, 13)
+test.err<- rep(0, 13)
+ind<-rep(0,13)
+for(i in 1:13){
+              fit<- randomForest(medv~., data = Boston_train, mtry=i)
+              oob.err[i]<- fit$mse[500]
+              test.err[i]<- mean((Boston_test$medv-predict(fit, Boston_test))^2)
+              cat(i, " ")
+              ind[i]<-i
+              }
+matplot(cbind(test.err, oob.err), pch=15, col = c("red", "blue"), type = "b", ylab = "MSE", xlab = "mtry")
+legend("topright", legend = c("test Error", "OOB Error"), pch = 15, col = c("red", "blue"))
+
+optimal.var = ind[which(oob.err==min(oob.err))]
+```
+
+Using the optimal value of number of variables
+```{r}
+boston.rf<- randomForest(medv~., data = Boston_train,
+                         importance=TRUE,mtry=optimal.var)
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.RF= predict(boston.rf)
+MSE.RF<-mean((Boston_train$medv-boston.train.pred.RF)^2)
+
+
+boston.rf.pred<- predict(boston.rf, Boston_test)
+MSPE.RF<-mean((Boston_test$medv-boston.rf.pred)^2)
+```
+
+
+# Boosting
+
+```{r}
+boston.boost<- gbm(medv~., data = Boston_train, 
+                   distribution = "gaussian", 
+                   n.trees = 10000, 
+                   shrinkage = 0.01, #Default is 0.1 which is too high
+                   interaction.depth = 8)
+summary(boston.boost) #Higher the better
+
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.Boost= predict(boston.boost,n.trees = 10000)
+MSE.Boost<-mean((Boston_train$medv-boston.train.pred.Boost)^2)
+
+boston.boost.pred.test<- predict(boston.boost, Boston_test, n.trees = 10000)
+MSPE.Boost<-mean((Boston_test$medv-boston.boost.pred.test)^2)
+```
+
+
+# Change in MSE with #trees
+```{r}
+ntree<- seq(100, 10000, 100)
+predmat<- predict(boston.boost, newdata = Boston_test, n.trees = ntree)
+err<- apply((Boston_test$medv-predmat)^2, 2, mean)
+plot(ntree, err, type = 'l', col=2, lwd=2, xlab = "n.trees", ylab = "Test MSE")
+abline(h=min(test.err), lty=2)
+
+optimal.tree.boost = ntree[which(err==min(err))]
+```
+
+Using the optimal value of number of trees
+```{r}
+boston.boost<- gbm(medv~., data = Boston_train, 
+                   distribution = "gaussian", 
+                   n.trees = optimal.tree.boost, 
+                   shrinkage = 0.01, #Default is 0.1 which is too high
+                   interaction.depth = 8)
+summary(boston.boost) #Higher the better
+```
+
+In sample and out of sample errors
+```{r}
+boston.train.pred.Boost= predict(boston.boost, n.trees = optimal.tree.boost)
+MSE.Boost<-mean((Boston_train$medv-boston.train.pred.Boost)^2)
+
+boston.boost.pred.test<- predict(boston.boost, Boston_test, n.trees = optimal.tree.boost)
+MSPE.Boost<-mean((Boston_test$medv-boston.boost.pred.test)^2)
+```
+
+
+
+
+# Final Table
+```{r}
+Technique<-rbind('Linear Regression', 'Regression Tree', 'Bagging', 'Random Forest', 'Boosting')
+
+MSE<-rbind(MSE.LM,MSE.Tree,MSE.Bag,MSE.RF,MSE.Boost)
+
+MSPE<-rbind(MSPE.LM,MSPE.Tree,MSPE.Bag,MSPE.RF,MSPE.Boost)
+
+Summary<-data.frame(Technique,MSE,MSPE)
+Summary
+```
+
+

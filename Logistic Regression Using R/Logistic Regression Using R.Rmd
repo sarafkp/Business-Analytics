@@ -1,0 +1,424 @@
+---
+title: "Logistic Regression"
+author: "KS"
+date: "2/23/2020"
+output: html_document
+---
+
+# 1. Objective
+The objective is to understand how logistic regression works and how to perform variable selection and test the model performance
+
+The data used for this exercise is the Credit Card Default data.
+Details : http://archive.ics.uci.edu/ml/datasets/default+of+credit+card+clients
+
+This research employed a binary variable, default payment (Yes = 1, No = 0), as the response variable.
+
+Variables:
+X1: Amount of the given credit (NT dollar): it includes both the individual consumer credit and his/her family (supplementary) credit. 
+X2: Gender (1 = male; 2 = female). 
+X3: Education (1 = graduate school; 2 = university; 3 = high school; 4 = others). 
+X4: Marital status (1 = married; 2 = single; 3 = others). 
+X5: Age (year). 
+X6 - X11: History of past payment. We tracked the past monthly payment records (from April to September, 2005) as follows: X6 = the repayment status in September, 2005; X7 = the repayment status in August, 2005; . . .;X11 = the repayment status in April, 2005. The measurement scale for the repayment status is: -1 = pay duly; 1 = payment delay for one month; 2 = payment delay for two months; . . .; 8 = payment delay for eight months; 9 = payment delay for nine months and above. 
+X12-X17: Amount of bill statement (NT dollar). X12 = amount of bill statement in September, 2005; X13 = amount of bill statement in August, 2005; . . .; X17 = amount of bill statement in April, 2005. 
+X18-X23: Amount of previous payment (NT dollar). X18 = amount paid in September, 2005; X19 = amount paid in August, 2005; . . .;X23 = amount paid in April, 2005. 
+
+# Lets get started
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(magrittr)
+library(datasets)
+library(class)
+library(plyr)
+library(MASS)
+library(dplyr)
+library(ROCR)
+library(PRROC)
+library(glmnet)
+library(boot)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+credit.data <- read.csv(file = "data/credit_default.csv", header=T)
+```
+
+
+# The first step is doing the EDA which can be referred in the 'Exploratory Data Analysis Using R' folder
+
+Renaming the column having the response variable and getting the summary statistics of the data
+```{r}
+credit.data<- rename(credit.data, default=default.payment.next.month)
+
+summary(credit.data)
+```
+
+Converting the categorical variables to factors 
+```{r}
+credit.data$SEX<- as.factor(credit.data$SEX)
+credit.data$EDUCATION<- as.factor(credit.data$EDUCATION)
+credit.data$MARRIAGE<- as.factor(credit.data$MARRIAGE)
+```
+
+As a part of EDA, it is very important to study the correlation between the response and predictor variables. At the same time, it is important to study the correlation between the predictors to avoid multicolinearity.
+
+Also, the direction of the correlation is important to validate the model performance. For eg., if there is a negative correlation between a predictor and response variable and the coeffecients of our model is positive, something is wrong in the model.
+
+### Keeping this in mind while performing EDA, lets get started
+
+Splitting the data into training and testing
+```{r}
+index <- sample(nrow(credit.data),nrow(credit.data)*0.80)
+credit.train = credit.data[index,]
+credit.test = credit.data[-index,]
+```
+
+Fitting a logistic regression model with all the variables
+```{r}
+credit.glm0<- glm(default~., family=binomial, data=credit.train)
+summary(credit.glm0)
+```
+
+The default link in glm() function is 'logit'. We can specify a different link function in the function like the 'probit' or 'log-log'
+
+# Model performance
+
+```{r}
+glm0.deviance<-credit.glm0$deviance
+
+glm0.AIC<-AIC(credit.glm0)
+
+glm0.BIC<-BIC(credit.glm0)
+
+```
+
+Now we can use the predict function to get the predicted values. To get the probability values, we need to specify type='response'
+```{r}
+hist(predict(credit.glm0))
+
+hist(predict(credit.glm0,type="response"))
+```
+
+Once we have the probability values, we can specify a cut-off value to change this continous response to binary.
+There are several methods to select the cut-off value which we will cover in the this code, but for now lets go with the simplest one 0.5.
+
+```{r}
+table(predict(credit.glm0,type="response") > 0.5)
+```
+
+
+# In-sample predictions
+
+By now we must be familiar with the concept of True positives and False positives.
+This concept is used to plot the ROC curve and guage the performance of the model.
+```{r}
+pred.glm0.train<- predict(credit.glm0, type="response")
+pred <- prediction(pred.glm0.train, credit.train$default)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+
+# Area under the curve. Larger the better.
+unlist(slot(performance(pred, "auc"), "y.values"))
+```
+
+
+# Out of sample predictions
+```{r}
+pred.glm0.test<- predict(credit.glm0, newdata = credit.test, type="response")
+pred <- prediction(pred.glm0.test, credit.test$default)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+
+# Area under the curve. Larger the better.
+unlist(slot(performance(pred, "auc"), "y.values"))
+```
+
+# Selecting the cut-off values
+
+1. Apart from selecting 0.5 another approach is to use mean of the response variable
+
+```{r}
+pcut1<- mean(credit.train$default)
+```
+
+Using this value, we analyze the model performance
+```{r}
+class.glm0.train<- (pred.glm0.train>pcut1)*1
+
+table(credit.train$default, class.glm0.train, dnn = c("True", "Predicted"))
+```
+
+
+To analyze the performance we can use various parameters like the misclassification rate, false positive rate, false negative rate, etc. based on the application
+
+```{r}
+# (equal-weighted) misclassification rate
+MR<- mean(credit.train$default!=class.glm0.train)
+
+# False positive rate
+FPR<- sum(credit.train$default==0 & class.glm0.train==1)/sum(credit.train$default==0)
+
+# False negative rate
+FNR<- sum(credit.train$default==1 & class.glm0.train==0)/sum(credit.train$default==1)
+```
+
+2. Using the grid search method to find the optimal cut-off value
+
+2.1 Defining an assymetric cost function to penalize the false negatives more than the false positives.
+
+The inputs to this function will be
+a. True values
+b. Predicted values
+c. Different candidates of the cut-off value
+```{r}
+costfunc = function(obs, pred.p, pcut){
+    weight1 = 5   # define the weight for "true=1 but pred=0" (FN)
+    weight0 = 1    # define the weight for "true=0 but pred=1" (FP)
+    c1 = (obs==1)&(pred.p<pcut)    # count for "true=1 but pred=0"   (FN)
+    c0 = (obs==0)&(pred.p>=pcut)   # count for "true=0 but pred=1"   (FP)
+    cost = mean(weight1*c1 + weight0*c0)  # misclassification with weight
+    return(cost)
+}
+```
+
+Now, we have to create a list of candidates of the cut-off values
+```{r}
+p.seq = seq(0.01, 1, 0.01) 
+```
+
+
+Using the function defined on the training dataset, we calculate the cost for each value of the cut-off candidates
+```{r}
+cost = rep(0, length(p.seq))  
+for(i in 1:length(p.seq)){ 
+    cost[i] = costfunc(obs = credit.train$default, pred.p = pred.glm0.train, pcut = p.seq[i])  
+}
+```
+
+We can visualize how the value of the cost function varies with the cut-off values and select the cut-off value with minimum cost
+```{r}
+plot(p.seq, cost)
+
+optimal.pcut.glm0 = p.seq[which(cost==min(cost))]
+```
+
+
+Using this value of cut-off we calculate eveluate the performance of the model
+```{r}
+class.glm0.train.opt<- (pred.glm0.train>optimal.pcut.glm0)*1
+
+full.model.conf.met.in<-table(credit.train$default, class.glm0.train.opt, 
+                              dnn = c("True", "Predicted"))
+
+MR.in<- mean(credit.train$default!= class.glm0.train.opt)
+
+FPR.in<- sum(credit.train$default==0 &
+          class.glm0.train.opt==1)/sum(credit.train$default==0)
+
+FNR.in<- sum(credit.train$default==1 &
+          class.glm0.train.opt==0)/sum(credit.train$default==1)
+
+cost.in<- costfunc(obs = credit.train$default, pred.p = pred.glm0.train, 
+                pcut =optimal.pcut.glm0) 
+```
+
+
+### We can use similar approach to eveluate the out of sample performance
+
+```{r}
+class.glm0.test.opt<- (pred.glm0.test>optimal.pcut.glm0)*1
+
+MR.out<- mean(credit.test$response!= class.glm0.test.opt)
+
+FPR.out<- sum(credit.test$response==0 & 
+              class.glm0.test.opt==1)/sum(credit.test$response==0)
+
+FNR.out<- sum(credit.test$response==1 &
+              class.glm0.test.opt==0)/sum(credit.test$response==1)
+
+
+cost.out<- costfunc(obs = credit.test$response,pred.p = pred.glm0.test, 
+                pcut = optimal.pcut.glm0) 
+```
+
+
+# Variable Selection
+
+This is the most important step in the model building process. We need to select only the variables which affect the response variable.
+
+There are various approaches for selecting variable:
+1. Step AIC
+2. Step BIC
+3. LASSO Variable selection
+
+Selecting model depends on the in-sample and out of sample performance of model selected using each of the above mentioned methods
+
+1. Step AIC function
+Default: Direction = 'backward'
+We can specift the direction of search by specifying the direction. Please see ?step for details
+```{r}
+credit.glm.back.AIC <- step(credit.glm0)
+
+summary(credit.glm.back.AIC)
+
+credit.glm.back.AIC.deviance<-credit.glm.back.AIC$deviance
+
+credit.glm.back.AIC.AIC<-AIC(credit.glm.back.AIC)
+
+credit.glm.back.AIC.BIC<-BIC(credit.glm.back.AIC)
+```
+
+
+2. Step BIC
+
+```{r}
+credit.glm.back.BIC <- step(credit.glm0, k=log(nrow(credit.train)))
+
+summary(credit.glm.back.BIC)
+
+credit.glm.back.BIC.deviance<-credit.glm.back.BIC$deviance
+
+credit.glm.back.BIC.AIC<-AIC(credit.glm.back.BIC)
+
+credit.glm.back.BIC.BIC<-BIC(credit.glm.back.BIC)
+```
+
+
+3. LASSO Variable selection
+
+Data preperation
+```{r}
+dummy<- model.matrix(~ ., data = credit.data)
+
+credit.data.lasso<- data.frame(dummy[,-1])
+
+credit.train.X = as.matrix(select(credit.data.lasso, -default)[index,])
+credit.test.X = as.matrix(select(credit.data.lasso, -default)[-index,])
+credit.train.Y = credit.data.lasso[index, "default"]
+credit.test.Y = credit.data.lasso[-index, "default"]
+
+```
+
+Fitting a LASSO model with all the variables
+```{r}
+credit.lasso<- glmnet(x=credit.train.X, y=credit.train.Y, family = "binomial")
+```
+
+Now, how to select the variables.
+Ans: Cross validation!
+Use cross validation to get the value of the lambda with minimum mean squared error
+
+```{r}
+credit.lasso.cv<- cv.glmnet(x=credit.train.X, y=credit.train.Y, family = "binomial", type.measure = "class")
+plot(credit.lasso.cv)
+```
+
+Refit the model on the entire training dataset
+```{r}
+credit.lasso<-glmnet(x=credit.train.X, y=credit.train.Y, family = "binomial",
+                     lambda =credit.lasso.cv$lambda.min)
+```
+
+Extracting the coeffecients and variables selected
+```{r}
+coef(credit.lasso, s=credit.lasso.cv$lambda.min)
+```
+
+
+# In-sample performance of the model selected using LASSO
+```{r}
+pred.lasso.train<- predict(credit.lasso.cv, newx=credit.train.X,
+                           s=credit.lasso.cv$lambda.min, type = "response")
+
+
+pred <- prediction(pred.lasso.train, credit.train.Y)
+
+perf <- performance(pred, "tpr", "fpr")#
+
+plot(perf, colorize=TRUE)#Color shows cutoff
+
+AUC.lasso.insample<-unlist(slot(performance(pred, "auc"), "y.values"))
+```
+
+# Out of sample prediction
+```{r}
+pred.lasso.test<- predict(credit.lasso.cv, newx=credit.test.X,
+                          s=credit.lasso.cv$lambda.min, type = "response")
+
+
+pred <- prediction(pred.lasso.test, credit.test.Y)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+AUC.lasso.outsample<-unlist(slot(performance(pred, "auc"), "y.values"))
+```
+
+
+
+### Remember the cost function we defined earlier? We can use that cost function to calculate the assymetric cost
+Optimal cut-off by grid search method with asymmetric cost
+```{r}
+cost.lasso = rep(0, length(p.seq))  
+for(i in 1:length(p.seq)){ 
+  cost.lasso[i] = costfunc(obs = credit.train.Y, pred.p = pred.lasso.train, pcut = p.seq[i])  
+}
+
+# Plot of the cut-off values and cost
+plot(p.seq, cost.lasso)
+
+# The optimal pcut
+optimal.pcut.lasso = p.seq[which(cost.lasso==min(cost.lasso))]
+
+```
+
+
+
+Using optimal cutoff to eveluate in-sample model performance
+```{r}
+class.lasso.train.opt<-(pred.lasso.train>optimal.pcut.lasso)*1
+
+lasso.conf.met<-table(credit.train.Y, class.lasso.train.opt, 
+                      dnn = c("True", "Predicted"))
+
+MR.lasso<- mean(credit.train.Y!= class.lasso.train.opt)
+
+FPR.lasso<- sum(credit.train.Y==0 & 
+                class.lasso.train.opt==1)/sum(credit.train.Y==0)
+
+FNR.lasso<- sum(credit.train.Y==1 &
+                class.lasso.train.opt==0)/sum(credit.train.Y==1)
+
+
+cost.lasso<- costfunc(obs = credit.train.Y,pred.p = pred.lasso.train, 
+                pcut = optimal.pcut.lasso)  
+```
+
+
+Using optimal cutoff to eveluate out of sample model performance
+```{r}
+class.lasso.test.opt<-(pred.lasso.test>optimal.pcut.lasso)*1
+
+lasso.conf.met.out<-table(credit.test.Y, class.lasso.test.opt, 
+                          dnn = c("True", "Predicted"))
+
+
+MR.lasso.out<- mean(credit.test.Y!= class.lasso.test.opt)
+
+FPR.lasso.out<- sum(credit.test.Y==0 &
+                    class.lasso.test.opt==1)/sum(credit.test.Y==0)
+
+FNR.lasso.out<- sum(credit.test.Y==1 &
+                    class.lasso.test.opt==0)/sum(credit.test.Y==1)
+
+
+cost.lasso.out<- costfunc(obs = credit.test.Y,pred.p = pred.lasso.test, 
+                pcut = optimal.pcut.lasso)  
+```
+
+
+# Next Steps:
+1. Eveluate the performance of the models selected using stepAIC and stepBIC functions
+2. Compare the default model with the other models built
+3. Select the model with best performance
+4. We can use the cut-off value selected in LASSO to calculate the AUC with assymetric cost
+5. We can also define an assymetric cost function for cv.glm to get the shrinkage parameters with assymetric costs
