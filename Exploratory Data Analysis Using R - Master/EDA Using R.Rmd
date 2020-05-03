@@ -1,0 +1,380 @@
+---
+title: "Exploratory Data Analysis "
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+library(tidyverse)
+library(sqldf)
+```
+
+
+## Explore the *CustomerData* Dataset with R
+
+### 1.Load Data
+
+```{r}
+CustomerData<-read.csv("/data/CustomerData.csv",header=TRUE,sep=",")
+```
+
+### 1.1Take a look into the data
+
+```{r}
+head(CustomerData)
+```
+
+### 1.2 Size of the dataset
+### 1.2.1 How larger is my dataset? How many rows? How many columns?
+
+```{r}
+dim(CustomerData)
+```
+
+### 1.2.2 How many columns?
+```{r}
+ncol(CustomerData)
+```
+
+# 1.2.3 How many rows?
+```{r}
+nrow(CustomerData)
+```
+
+# 1.3 Glimpse at the variables
+
+# 1.3.1 What is the name of my columns?
+
+```{r}
+names(CustomerData)
+
+#OR
+
+colnames(CustomerData)
+```
+
+# 1.3.2 What is the structure of the data
+
+```{r}
+str(CustomerData)
+```
+
+# 1.3.3 How to get the format a column
+
+```{r}
+class(CustomerData[,1])
+```
+
+# 1.4 Summary statistics of the dataset
+
+# 1.4.1 Getting the summary of the dataset
+
+```{r}
+summary(CustomerData)
+```
+
+# 1.4.2 Getting some other statistics
+
+```{r}
+#Standard Deviation
+sd(CustomerData$Age)
+
+#Quantiles
+quantile(CustomerData$Age)
+```
+
+# 1.4.3 Getting statistics for multiple columns
+```{r}
+apply(CustomerData[,c(5,6,11)], 2, sd) 
+```
+
+# 1.4.4 Summarizing the dataset to aggregate data and calculate various ststistical values
+
+```{r}
+#Mean
+aggregate(.~Gender, CustomerData, mean) 
+
+#Std. Deviation
+aggregate(.~Gender, CustomerData, sd)
+```
+
+# 1.4.5 One way counting
+```{r}
+table(CustomerData$Gender)
+```
+
+# 1.4.6 Two way counting table
+
+```{r}
+table(CustomerData$Gender,CustomerData$UnionMember)
+```
+
+### 2. Exploratory Data Analysis using Visualizations
+
+# 2.1.1 Single Histogram
+```{r}
+hist(CustomerData$Age, col="yellow", breaks=20)
+```
+
+# 2.1.2 Histogram combined with density curve
+
+```{r}
+hist(CustomerData$Age, prob=T, col="yellow", breaks=20, main="Histogram and Density of Age", xlim=c(min(CustomerData$Age)-1,max(CustomerData$Age)+1), xlab="Age")
+lines(density(CustomerData$Age), col="red", lwd=2)
+
+# Add a vertical line that indicates the average of Sepal Length
+abline(v=mean(CustomerData$Age), col="blue", lty=2, lwd=1.5)
+```
+
+*You can change the color of the histogram, the density curve and the verticle line*
+*In addition to that, you can set the range of your x-axis by varying values in xlim*
+*Further, you can use median or other aggregations to plot the verticle line*
+
+
+## 2.1.3 Plotting multiple bar charts
+
+```{r}
+avg<- apply(CustomerData[,c(5,6)], 2, mean)
+barplot(avg, ylab = "Average")
+```
+
+## 2.1.4 Plotting multiple bar charts for same variable split by another variable
+
+```{r}
+counts <- table(CustomerData$UnionMember,CustomerData$Gender)
+barplot(counts, main="Union Members by Gender",
+  xlab="Gender", col=c("darkblue","yellow"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+## 2.2 Finding the outliers
+
+# 2.2.1 Single box plot
+```{r}
+boxplot(CustomerData$Age)
+```
+
+*The center line represents the median and the two ends of the box represent the 25th and 75th percentiles or 1st and 3rd Quantile*
+*The outer lines represent 1.5 x IQR (Inter Quantile Range is the width of the box)*
+
+## 2.2.2 Plotting multiple box plots in same graph
+```{r}
+boxplot(CustomerData[,c(5,6,9)], notch=T, col=c("blue", "yellow","red"))
+```
+
+## 2.2.3 Box plot of single variable with groups
+
+```{r}
+boxplot(CustomerData[,'HouseholdSize']~CustomerData[,'Gender'], notch=T, ylab="Household Size", col="blue")
+```
+
+
+## 2.3.1 Scatter plot to observe the relation between two variables
+
+```{r}
+plot(CustomerData$Age, CustomerData$HouseholdSize, xlab = "Age", ylab = "HH Size", main = "Household Size vs Age")
+```
+
+## 2.3.2 Scatter plot of multiple variables 
+
+```{r}
+pairs(CustomerData[,c(5,6,11)])
+```
+
+
+## 2.4 Plotting multiple graphs in same window
+
+```{r}
+# set arrangement of multiple plots. 2,2 will allow us to plot 4 graphs in a window
+par(mfrow=c(2,2))
+# set mrgins
+par(mar=c(4.5, 4.2, 3, 1.5)) 
+
+#Graph1
+hist(CustomerData$Age, xlab = "Age", cex.lab=1.5, col = "yellow")
+
+#Graph2
+hist(CustomerData$HHIncome, xlab = "Household Income", col = "red")
+
+#Graph3 (pch allows us to change shapes)
+plot(CustomerData$Age, CustomerData$HouseholdSize, xlab = "Age", ylab = "Household Size", main= "Household Size vs Age", pch=17)
+
+#Graph4
+boxplot(CustomerData[,c(5,6)], notch=T, col=c("red", "blue"))
+```
+
+
+### 3. Using Tidyverse for exploratory data analysis
+
+### 3.1 Filtering data
+
+# 3.1.1 Method 1 : Using subset() function
+```{r}
+subset(x = CustomerData, subset = Age > 25 & HHIncome > 400000)
+
+# OR
+
+subset(CustomerData, Age > 25 & HHIncome > 400000)
+
+# OR
+
+CustomerData[(CustomerData$Age > 25 & CustomerData$HHIncome > 400000), ]
+```
+
+# 3.1.2 Method 2 : Using SQL to filter data
+
+```{r}
+sqldf('select * from CustomerData where `Age` > 25 and `HHIncome` > 400000')
+```
+
+# 3.1.3 Method 3 : Using filter() function
+
+```{r}
+CustomerData1 <- filter(CustomerData, Age>25 & HHIncome>400000)
+CustomerData2 <- filter(CustomerData1, Gender=="Female", EducationYears<=20 | UnionMember=="Yes")
+```
+
+### 3.2.1 Random subsetting of data
+
+```{r}
+# Randomly sampling 90% data
+CustomerDataSample1 <- CustomerData[sample(x = nrow(CustomerData), size = nrow(CustomerData)*0.90),]
+
+# OR
+
+CustomerDataSample2 <- sample_frac(CustomerData, 0.9)
+
+# To sample fixed number of rows
+CustomerDataSample3 <- sample_n(CustomerData, 1000)
+
+```
+
+
+# 3.2.2 Randomly splitting data into two groups
+
+```{r}
+index <- sample(nrow(CustomerData),nrow(CustomerData)*0.90)
+CustomerData.train = CustomerData[index,]
+CustomerData.test = CustomerData[-index,]
+```
+
+
+### 3.3 Sorting data
+
+*Here we are extracting the first 5 rows. This can be modified based on the requirements*
+
+```{r}
+CustomerData[order(CustomerData$Age, decreasing = TRUE)[1:5], ] 
+
+# OR
+
+arrange(CustomerData, desc(Age))[1:5, ] #Descending
+
+# OR 
+
+arrange(CustomerData, Age)[1:5, ] #Ascending
+
+# Sorting using multiple columns
+
+CustomerData_sort<- arrange(CustomerData, Age, desc(HHIncome))[1:5,]
+```
+
+
+### 3.4 Variable details
+
+## 3.4.1 Extracting column names
+
+```{r}
+names(CustomerData)
+```
+
+# 3.4.2 Selecting columns
+
+```{r}
+CustomerData[, c("Age", "HHIncome")]
+
+# OR
+
+varname <- c("Age", "HHIncome")
+CustomerData_select <- select(CustomerData, varname)
+
+# OR
+
+CustomerData_select <- CustomerData[,varname]
+
+```
+
+
+# 3.4.3 Dropping columns
+
+```{r}
+CustomerData_select2 <- select(CustomerData, -Age, -HHIncome)
+
+# OR
+
+varname <- c("Age", "HHIncome")
+CustomerData_select2 <- CustomerData[,!names(CustomerData) %in% varname]
+names(CustomerData_select2)
+```
+
+
+# 3.4.4 Reordering columns
+
+```{r}
+CustomerData_order2 <- select(CustomerData, Age, HHIncome, everything())
+
+names(CustomerData_order2)
+```
+
+# 3.4.5 Renaming variables
+
+```{r}
+CustomerData_rename<- rename(CustomerData, Education=EducationYears, Income=HHIncome)
+
+CustomerData_rename1<-select(CustomerData_rename, Education, Income, everything())
+
+names(CustomerData_rename1)
+```
+
+
+# 3.4.6 Creating new variable
+
+*There are multiple ways to create new columns. Using mutate is the simplest while other methods might require multiple steps*
+
+```{r}
+CustomerData_newvar<- mutate(CustomerData, Age_Income_Ratio=HHIncome/Age)
+names(CustomerData_newvar)
+```
+
+
+### 3.5 Missing data analysis
+
+# 3.5.1 Getting the number of missing values in the dataset
+
+```{r}
+sum(is.na(CustomerData))
+```
+
+# 3.5.2 Getting the missing values for each variable
+
+```{r}
+colSums(is.na(CustomerData))
+```
+
+
+# 3.5.3 Removing entries with missing values
+```{r}
+CustomerData.Clean<- na.omit(CustomerData)
+
+sum(is.na(CustomerData.Clean))
+```
+
+
+# 3.5.4 Removing entries with missing values for a specific variable
+```{r}
+CustomerData.Clean1<-CustomerData[!is.na(CustomerData$NumberPets),]
+
+colSums(is.na(CustomerData.Clean1))
+```
